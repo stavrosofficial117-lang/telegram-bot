@@ -92,12 +92,10 @@ def save_code_block(lang: str, code: str, index: int) -> Path:
     return filename
 
 async def send_long_message(update: Update, text: str):
-    """Telegram max is 4096 chars — split if needed."""
     max_len = 4000
     for i in range(0, len(text), max_len):
         await update.message.reply_text(
-            text[i : i + max_len],
-            parse_mode="Markdown"
+            text[i : i + max_len]
         )
 
 async def ask_claude(user_id: int, user_message: str) -> str:
