@@ -1,2 +1,5 @@
 python-telegram-bot==21.6
 anthropic>=0.25.0
+edge-tts>=6.1.0
+SpeechRecognition>=3.10.0
+pydub>=0.25.1
