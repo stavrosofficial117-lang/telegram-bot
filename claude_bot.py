@@ -410,7 +410,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     try:
         ai_response = await get_ai_response(user_message, user_id)
-        await update.message.reply_text(ai_response, parse_mode="Markdown")
+
+        # Try markdown first, fall back to plain text
+        try:
+            await update.message.reply_text(ai_response, parse_mode="Markdown")
+        except Exception:
+            await update.message.reply_text(ai_response)
 
         if await db.get_voice_enabled(user_id):
             await context.bot.send_chat_action(
@@ -457,7 +462,10 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
         ai_response = await get_ai_response(transcription, user_id)
-        await update.message.reply_text(ai_response, parse_mode="Markdown")
+        try:
+            await update.message.reply_text(ai_response, parse_mode="Markdown")
+        except Exception:
+            await update.message.reply_text(ai_response)
 
         if await db.get_voice_enabled(user_id):
             await context.bot.send_chat_action(
@@ -559,7 +567,10 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ]
 
         ai_response = await get_ai_response(caption, user_id, extra_content)
-        await update.message.reply_text(ai_response, parse_mode="Markdown")
+        try:
+            await update.message.reply_text(ai_response, parse_mode="Markdown")
+        except Exception:
+            await update.message.reply_text(ai_response)
 
         if await db.get_voice_enabled(user_id):
             await send_voice_reply(update, ai_response)
