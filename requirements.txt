@@ -1,5 +1,20 @@
-python-telegram-bot==21.6
-anthropic>=0.25.0
-edge-tts>=6.1.0
-SpeechRecognition>=3.10.0
-pydub>=0.25.1
+# Telegram Bot
+python-telegram-bot==20.7
+
+# Anthropic (Claude API)
+anthropic>=0.89.0
+
+# Local Whisper voice transcription (no API key needed)
+openai-whisper
+
+# Text-to-Speech (voice replies)
+edge-tts>=7.2.8
+
+# Database (persistent memory)
+aiosqlite==0.19.0
+
+# Environment variables
+python-dotenv==1.0.0
+
+# Audio conversion (ogg → wav for Whisper)
+pydub==0.25.1
