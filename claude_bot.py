@@ -156,6 +156,25 @@ async def text_to_voice(text: str, out_path: str):
     await communicate.save(out_path)
 
 
+async def send_long_message(update: Update, text: str):
+    """Send a message, splitting it if it exceeds Telegram's 4096 char limit."""
+    max_length = 4000
+    if len(text) <= max_length:
+        try:
+            await update.message.reply_text(text, parse_mode="Markdown")
+        except Exception:
+            await update.message.reply_text(text)
+        return
+
+    # Split into chunks
+    chunks = [text[i:i+max_length] for i in range(0, len(text), max_length)]
+    for chunk in chunks:
+        try:
+            await update.message.reply_text(chunk, parse_mode="Markdown")
+        except Exception:
+            await update.message.reply_text(chunk)
+
+
 async def strip_markdown(text: str) -> str:
     """Remove markdown formatting before sending to TTS."""
     import re
@@ -410,12 +429,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     try:
         ai_response = await get_ai_response(user_message, user_id)
-
-        # Try markdown first, fall back to plain text
-        try:
-            await update.message.reply_text(ai_response, parse_mode="Markdown")
-        except Exception:
-            await update.message.reply_text(ai_response)
+        await send_long_message(update, ai_response)
 
         if await db.get_voice_enabled(user_id):
             await context.bot.send_chat_action(
@@ -462,10 +476,7 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
         ai_response = await get_ai_response(transcription, user_id)
-        try:
-            await update.message.reply_text(ai_response, parse_mode="Markdown")
-        except Exception:
-            await update.message.reply_text(ai_response)
+        await send_long_message(update, ai_response)
 
         if await db.get_voice_enabled(user_id):
             await context.bot.send_chat_action(
@@ -567,10 +578,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ]
 
         ai_response = await get_ai_response(caption, user_id, extra_content)
-        try:
-            await update.message.reply_text(ai_response, parse_mode="Markdown")
-        except Exception:
-            await update.message.reply_text(ai_response)
+        await send_long_message(update, ai_response)
 
         if await db.get_voice_enabled(user_id):
             await send_voice_reply(update, ai_response)
