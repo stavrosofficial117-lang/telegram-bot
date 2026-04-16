@@ -1,0 +1,4 @@
+.env
+workspace/
+nohup.out
+__pycache__/
