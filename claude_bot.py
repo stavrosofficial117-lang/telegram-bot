@@ -19,8 +19,8 @@ from telegram.constants import ChatAction
 # Anthropic (Claude)
 import anthropic
 
-# Local Whisper (voice transcription, no API key needed)
-import whisper as local_whisper
+# Groq (Whisper voice transcription - free & fast)
+from groq import AsyncGroq
 
 # Text-to-Speech
 import edge_tts
@@ -42,7 +42,8 @@ load_dotenv()
 
 BOT_TOKEN         = os.getenv("BOT_TOKEN")
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
-OPENAI_API_KEY    = None  # Not needed — using local Whisper
+GROQ_API_KEY      = os.getenv("GROQ_API_KEY")
+OPENAI_API_KEY    = None  # Not needed — using Groq
 TTS_VOICE         = os.getenv("TTS_VOICE", "en-US-JennyNeural")
 _raw_id           = os.getenv("ALLOWED_USER_ID", "")
 ALLOWED_USER_ID   = int(_raw_id) if _raw_id.strip().isdigit() else None
@@ -79,13 +80,8 @@ logger = logging.getLogger(__name__)
 #  API CLIENTS
 # ─────────────────────────────────────────────
 
-claude  = anthropic.AsyncAnthropic(api_key=ANTHROPIC_API_KEY)
-
-# Load local Whisper model once at startup
-# Options: "tiny", "base", "small", "medium" (larger = more accurate but slower)
-logger.info("Loading Whisper model...")
-whisper_model = local_whisper.load_model("base")
-logger.info("✅ Whisper model loaded")
+claude = anthropic.AsyncAnthropic(api_key=ANTHROPIC_API_KEY)
+groq_client = AsyncGroq(api_key=GROQ_API_KEY)
 
 # ─────────────────────────────────────────────
 #  RATE LIMITING
@@ -145,13 +141,13 @@ def rate_limit(func):
 # ─────────────────────────────────────────────
 
 async def transcribe_voice(ogg_path: str) -> str:
-    """Transcribe a voice message using local Whisper model."""
-    loop = asyncio.get_event_loop()
-    # Run in executor so it doesn't block the async event loop
-    result = await loop.run_in_executor(
-        None, lambda: whisper_model.transcribe(ogg_path)
-    )
-    return result["text"]
+    """Transcribe a voice message using Groq Whisper API."""
+    with open(ogg_path, "rb") as audio_file:
+        transcript = await groq_client.audio.transcriptions.create(
+            model="whisper-large-v3",
+            file=audio_file
+        )
+    return transcript.text
 
 
 async def text_to_voice(text: str, out_path: str):

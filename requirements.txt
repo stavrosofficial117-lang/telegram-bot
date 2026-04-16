@@ -4,8 +4,8 @@ python-telegram-bot==20.7
 # Anthropic (Claude API)
 anthropic>=0.89.0
 
-# Local Whisper voice transcription (no API key needed)
-openai-whisper
+# Groq (Whisper voice transcription - free & fast)
+groq
 
 # Text-to-Speech (voice replies)
 edge-tts>=7.2.8
