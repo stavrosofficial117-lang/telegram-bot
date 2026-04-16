@@ -156,13 +156,27 @@ async def text_to_voice(text: str, out_path: str):
     await communicate.save(out_path)
 
 
+async def strip_markdown(text: str) -> str:
+    """Remove markdown formatting before sending to TTS."""
+    import re
+    text = re.sub(r'#{1,6}\s*', '', text)        # headers
+    text = re.sub(r'\*\*(.*?)\*\*', r'\1', text) # bold
+    text = re.sub(r'\*(.*?)\*', r'\1', text)      # italic
+    text = re.sub(r'`{1,3}.*?`{1,3}', '', text, flags=re.DOTALL)  # code
+    text = re.sub(r'\[([^\]]+)\]\([^\)]+\)', r'\1', text)  # links
+    text = re.sub(r'^[-•]\s*', '', text, flags=re.MULTILINE)  # bullets
+    text = re.sub(r'\n{2,}', '\n', text)          # extra newlines
+    return text.strip()
+
+
 async def send_voice_reply(update: Update, text: str):
     """Generate TTS and send as a Telegram voice message."""
     mp3_path = tempfile.mktemp(suffix=".mp3")
     ogg_path = tempfile.mktemp(suffix=".ogg")
 
     try:
-        await text_to_voice(text, mp3_path)
+        clean_text = await strip_markdown(text)
+        await text_to_voice(clean_text, mp3_path)
         audio = AudioSegment.from_mp3(mp3_path)
         audio.export(ogg_path, format="ogg", codec="libopus")
 
