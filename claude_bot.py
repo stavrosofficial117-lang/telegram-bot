@@ -461,6 +461,10 @@ async def clear_memory_command(update: Update, context: ContextTypes.DEFAULT_TYP
     await update.message.reply_text(
         "🧠 All memories cleared! I'll start fresh from now."
     )
+
+
+@private_only
+async def build_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Trigger the project builder with /build <description>."""
     description = " ".join(context.args)
 
