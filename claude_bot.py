@@ -28,8 +28,8 @@ import edge_tts
 # Audio conversion
 from pydub import AudioSegment
 
-# Database & project builder
-from database_manager import db
+# Tavily web search
+from tavily import TavilyClient
 from project_builder import builder
 
 # Environment
@@ -45,7 +45,7 @@ ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
 GROQ_API_KEY      = os.getenv("GROQ_API_KEY")
 OPENAI_API_KEY    = None  # Not needed — using Groq
 TTS_VOICE         = os.getenv("TTS_VOICE", "en-US-JennyNeural")
-_raw_id           = os.getenv("ALLOWED_USER_ID", "")
+TAVILY_API_KEY    = os.getenv("TAVILY_API_KEY")
 ALLOWED_USER_ID   = int(_raw_id) if _raw_id.strip().isdigit() else None
 
 # Supported text file extensions for file reading
@@ -60,6 +60,14 @@ BUILD_TRIGGERS = [
     "build me", "build a", "create a project", "make me a",
     "generate a project", "write me a project", "develop a",
     "code me a", "create me a"
+]
+
+# Keywords that trigger a web search
+SEARCH_TRIGGERS = [
+    "search for", "search ", "look up", "find me", "what's the latest",
+    "latest news", "current price", "what is happening", "today's",
+    "news about", "recent news", "right now", "currently", "live price",
+    "stock price", "weather in", "who won", "what happened to"
 ]
 
 # ─────────────────────────────────────────────
@@ -80,8 +88,9 @@ logger = logging.getLogger(__name__)
 #  API CLIENTS
 # ─────────────────────────────────────────────
 
-claude = anthropic.AsyncAnthropic(api_key=ANTHROPIC_API_KEY)
+claude      = anthropic.AsyncAnthropic(api_key=ANTHROPIC_API_KEY)
 groq_client = AsyncGroq(api_key=GROQ_API_KEY)
+tavily      = TavilyClient(api_key=TAVILY_API_KEY) if TAVILY_API_KEY else None
 
 # ─────────────────────────────────────────────
 #  RATE LIMITING
@@ -214,6 +223,30 @@ async def send_voice_reply(update: Update, text: str):
 # ─────────────────────────────────────────────
 #  AI RESPONSE
 # ─────────────────────────────────────────────
+
+async def web_search(query: str) -> str:
+    """Search the web using Tavily and return formatted results."""
+    if not tavily:
+        return ""
+    try:
+        loop = asyncio.get_event_loop()
+        results = await loop.run_in_executor(
+            None,
+            lambda: tavily.search(query=query, max_results=5)
+        )
+        if not results or "results" not in results:
+            return ""
+
+        formatted = f"🔍 Web search results for: *{query}*\n\n"
+        for i, r in enumerate(results["results"], 1):
+            formatted += f"{i}. **{r.get('title', 'No title')}**\n"
+            formatted += f"   {r.get('content', '')[:200]}...\n"
+            formatted += f"   🔗 {r.get('url', '')}\n\n"
+        return formatted
+    except Exception as e:
+        logger.error(f"Search error: {e}")
+        return ""
+
 
 async def get_ai_response(user_message: str, user_id: int,
                            extra_content: list = None) -> str:
@@ -423,12 +456,21 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await _run_project_build(update, user_message)
         return
 
+    # Web search trigger
+    search_context = ""
+    if tavily and any(t in lower for t in SEARCH_TRIGGERS):
+        await update.message.reply_text("🔍 Searching the web...")
+        search_results = await web_search(user_message)
+        if search_results:
+            await send_long_message(update, search_results)
+            search_context = f"\n\nWeb search results to help answer:\n{search_results}"
+
     await context.bot.send_chat_action(
         chat_id=update.effective_chat.id, action=ChatAction.TYPING
     )
 
     try:
-        ai_response = await get_ai_response(user_message, user_id)
+        ai_response = await get_ai_response(user_message + search_context, user_id)
         await send_long_message(update, ai_response)
 
         if await db.get_voice_enabled(user_id):
