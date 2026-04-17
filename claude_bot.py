@@ -46,6 +46,7 @@ GROQ_API_KEY      = os.getenv("GROQ_API_KEY")
 OPENAI_API_KEY    = None  # Not needed — using Groq
 TTS_VOICE         = os.getenv("TTS_VOICE", "en-US-JennyNeural")
 TAVILY_API_KEY    = os.getenv("TAVILY_API_KEY")
+_raw_id           = os.getenv("ALLOWED_USER_ID", "")
 ALLOWED_USER_ID   = int(_raw_id) if _raw_id.strip().isdigit() else None
 
 # Supported text file extensions for file reading
