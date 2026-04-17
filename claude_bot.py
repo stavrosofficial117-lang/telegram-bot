@@ -253,10 +253,57 @@ async def web_search(query: str) -> str:
         return ""
 
 
+MEMORY_EXTRACTION_PROMPT = """You are a memory extraction assistant.
+Given a conversation message, extract any important personal facts worth remembering.
+These include: preferences, skills, projects, goals, constraints, personal details.
+
+Respond with a JSON array of strings, each being a concise memory to save.
+If nothing important, respond with an empty array: []
+
+Examples:
+- "I prefer Python" -> ["User prefers Python over other languages"]
+- "I'm building a SaaS" -> ["User is building a SaaS product"]
+- "my budget is $500" -> ["User's budget is $500"]
+- "what's 2+2" -> []
+
+Respond ONLY with the JSON array, no other text."""
+
+
+async def extract_and_save_memories(user_id: int, message: str):
+    """Extract important facts from a message and save to memory."""
+    try:
+        response = await claude.messages.create(
+            model="claude-sonnet-4-5",
+            max_tokens=300,
+            system=MEMORY_EXTRACTION_PROMPT,
+            messages=[{"role": "user", "content": message}]
+        )
+        raw = response.content[0].text.strip()
+        if raw.startswith("```"):
+            raw = raw.split("\n", 1)[-1].rsplit("```", 1)[0]
+
+        import json
+        memories = json.loads(raw)
+        for memory in memories:
+            if memory and len(memory) > 5:
+                await db.save_memory(user_id, memory)
+    except Exception as e:
+        logger.error(f"Memory extraction error: {e}")
+
+
 async def get_ai_response(user_message: str, user_id: int,
                            extra_content: list = None) -> str:
-    """Get a response from Claude with persistent conversation history."""
+    """Get a response from Claude with persistent conversation history and memory."""
     history = await db.get_conversation_history(user_id, limit=10)
+
+    # Load user memories and inject into system prompt
+    memories = await db.get_memories(user_id)
+    memory_context = ""
+    if memories:
+        memory_context = "\n\nWhat you know about this user:\n"
+        memory_context += "\n".join(f"- {m}" for m in memories)
+
+    enhanced_system = SYSTEM_PROMPT + memory_context
 
     if extra_content:
         content = extra_content + [{"type": "text", "text": user_message}]
@@ -267,12 +314,16 @@ async def get_ai_response(user_message: str, user_id: int,
     response = await claude.messages.create(
         model="claude-sonnet-4-5",
         max_tokens=2000,
-        system=SYSTEM_PROMPT,
+        system=enhanced_system,
         messages=history
     )
 
     ai_response = response.content[0].text
     await db.log_conversation(user_id, user_message, ai_response)
+
+    # Extract and save memories in the background
+    asyncio.create_task(extract_and_save_memories(user_id, user_message))
+
     return ai_response
 
 # ─────────────────────────────────────────────
@@ -382,7 +433,34 @@ async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 @private_only
-async def build_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def memory_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Show saved memories about the user."""
+    user_id = update.effective_user.id
+    memories = await db.get_memories(user_id)
+
+    if not memories:
+        await update.message.reply_text(
+            "🧠 No memories saved yet. Just chat normally and I'll start "
+            "remembering important things about you!"
+        )
+        return
+
+    memory_list = "\n".join(f"{i+1}. {m}" for i, m in enumerate(memories))
+    await update.message.reply_text(
+        f"🧠 *What I remember about you:*\n\n{memory_list}\n\n"
+        f"Use /clearmemory to wipe all memories.",
+        parse_mode="Markdown"
+    )
+
+
+@private_only
+async def clear_memory_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Clear all memories."""
+    user_id = update.effective_user.id
+    await db.clear_memories(user_id)
+    await update.message.reply_text(
+        "🧠 All memories cleared! I'll start fresh from now."
+    )
     """Trigger the project builder with /build <description>."""
     description = " ".join(context.args)
 
@@ -674,12 +752,14 @@ def main():
     )
 
     # Commands
-    application.add_handler(CommandHandler("start",  start))
-    application.add_handler(CommandHandler("help",   help_command))
-    application.add_handler(CommandHandler("voice",  voice_toggle))
-    application.add_handler(CommandHandler("build",  build_command))
-    application.add_handler(CommandHandler("clear",  clear_context))
-    application.add_handler(CommandHandler("stats",  stats_command))
+    application.add_handler(CommandHandler("start",       start))
+    application.add_handler(CommandHandler("help",        help_command))
+    application.add_handler(CommandHandler("voice",       voice_toggle))
+    application.add_handler(CommandHandler("build",       build_command))
+    application.add_handler(CommandHandler("clear",       clear_context))
+    application.add_handler(CommandHandler("stats",       stats_command))
+    application.add_handler(CommandHandler("memory",      memory_command))
+    application.add_handler(CommandHandler("clearmemory", clear_memory_command))
 
     # Messages
     application.add_handler(

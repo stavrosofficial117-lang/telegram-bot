@@ -144,6 +144,18 @@ class DatabaseManager:
                 )
             """)
 
+            # User memories table (persistent facts about the user)
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS user_memories (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER,
+                    memory TEXT NOT NULL,
+                    category TEXT DEFAULT 'general',
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (user_id) REFERENCES users (user_id)
+                )
+            """)
+
             await db.commit()
             logger.info("Database initialized successfully")
 
@@ -381,6 +393,50 @@ class DatabaseManager:
                 'completed_projects': project_counts.get('completed', 0),
                 'conversations_today': conversations_today
             }
+
+    async def save_memory(self, user_id: int, memory: str,
+                           category: str = 'general'):
+        """Save a memory about the user."""
+        async with aiosqlite.connect(self.db_path) as db:
+            # Avoid duplicate memories
+            cursor = await db.execute("""
+                SELECT id FROM user_memories
+                WHERE user_id = ? AND memory = ?
+            """, (user_id, memory))
+            existing = await cursor.fetchone()
+            if not existing:
+                await db.execute("""
+                    INSERT INTO user_memories (user_id, memory, category)
+                    VALUES (?, ?, ?)
+                """, (user_id, memory, category))
+                await db.commit()
+
+    async def get_memories(self, user_id: int, limit: int = 20) -> List[str]:
+        """Get all memories for a user."""
+        async with aiosqlite.connect(self.db_path) as db:
+            cursor = await db.execute("""
+                SELECT memory FROM user_memories
+                WHERE user_id = ?
+                ORDER BY created_at DESC LIMIT ?
+            """, (user_id, limit))
+            rows = await cursor.fetchall()
+            return [row[0] for row in rows]
+
+    async def delete_memory(self, user_id: int, memory_id: int):
+        """Delete a specific memory."""
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute("""
+                DELETE FROM user_memories WHERE id = ? AND user_id = ?
+            """, (memory_id, user_id))
+            await db.commit()
+
+    async def clear_memories(self, user_id: int):
+        """Clear all memories for a user."""
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute(
+                "DELETE FROM user_memories WHERE user_id = ?", (user_id,)
+            )
+            await db.commit()
 
     async def find_project_by_context(self, user_id: int,
                                        message: str) -> Optional[int]:
