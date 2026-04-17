@@ -60,6 +60,9 @@ TEXT_EXTENSIONS = {
     ".sh", ".sql", ".xml", ".toml", ".ini", ".cfg"
 }
 
+# Track builds waiting for user answers {user_id: original_description}
+pending_builds: dict = {}
+
 # Keywords that trigger the project builder naturally
 BUILD_TRIGGERS = [
     "build me", "build a", "create a project", "make me a",
@@ -483,21 +486,38 @@ async def build_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ─────────────────────────────────────────────
 
 async def _run_project_build(update: Update, description: str):
-    """Run the project builder and send the zip to the user."""
+    """Ask clarifying questions first, then build on next message."""
     user_id = update.effective_user.id
+
+    # Ask clarifying questions
+    await update.message.reply_text("🤔 Let me ask a few quick questions first...")
+    questions = await builder.get_clarifying_questions(description)
+
+    # Save description while waiting for answers
+    pending_builds[user_id] = description
+
+    await update.message.reply_text(questions)
+
+
+async def _execute_build(update: Update, description: str, answers: str):
+    """Execute the actual build with description + user answers."""
+    user_id = update.effective_user.id
+
+    # Combine description with answers for richer context
+    full_spec = f"Project: {description}\n\nUser specifications:\n{answers}"
 
     project_id = await db.create_project(
         user_id=user_id,
         project_name=description[:60],
         project_type="generated",
-        description=description
+        description=full_spec
     )
 
     async def progress(msg: str):
         await update.message.reply_text(msg)
 
     try:
-        zip_path = await builder.build(description, progress_callback=progress)
+        zip_path = await builder.build(full_spec, progress_callback=progress)
 
         with open(zip_path, "rb") as zf:
             await update.message.reply_document(
@@ -536,6 +556,13 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
     logger.info(f"[{username}] {user_message[:80]}")
+
+    # Check if user is answering build questions
+    if user_id in pending_builds:
+        original_description = pending_builds.pop(user_id)
+        await update.message.reply_text("🚀 Got it! Starting to build now...")
+        await _execute_build(update, original_description, user_message)
+        return
 
     # Natural language build trigger
     lower = user_message.lower()
