@@ -30,6 +30,10 @@ from pydub import AudioSegment
 
 # Tavily web search
 from tavily import TavilyClient
+
+# Database & project builder
+from database_manager import db
+from project_builder import builder
 from project_builder import builder
 
 # Environment
