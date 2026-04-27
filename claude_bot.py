@@ -753,6 +753,110 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
             os.remove(tmp_path)
 
 
+@private_only
+async def search_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Force a web search."""
+    query = " ".join(context.args)
+    if not query:
+        await update.message.reply_text(
+            "Please provide a search query.\n*Example:* `/search latest AI news`",
+            parse_mode="Markdown"
+        )
+        return
+
+    await update.message.reply_text("🔍 Searching the web...")
+    results = await web_search(query)
+    if results:
+        await send_long_message(update, results)
+        # Get Claude to summarize
+        summary = await get_ai_response(
+            f"Summarize these search results concisely:\n{results}",
+            update.effective_user.id
+        )
+        await send_long_message(update, summary)
+    else:
+        await update.message.reply_text("No results found. Try a different query.")
+
+
+@private_only
+async def projects_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """List all projects the user has built."""
+    user_id = update.effective_user.id
+    projects = await db.get_user_projects(user_id)
+
+    if not projects:
+        await update.message.reply_text(
+            "📁 No projects yet! Use `/build <description>` to create one.",
+            parse_mode="Markdown"
+        )
+        return
+
+    text = "📁 *Your Projects:*\n\n"
+    for i, p in enumerate(projects, 1):
+        text += f"{i}. *{p.name}*\n"
+        text += f"   Type: {p.project_type}\n"
+        text += f"   Phase: {p.current_phase}\n"
+        text += f"   Progress: {p.completion_percentage}%\n"
+        text += f"   Created: {p.created_at}\n\n"
+
+    await send_long_message(update, text)
+
+
+@private_only
+async def summarize_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Summarize the current conversation."""
+    user_id = update.effective_user.id
+    history = await db.get_conversation_history(user_id, limit=20)
+
+    if not history:
+        await update.message.reply_text(
+            "No conversation history to summarize yet!"
+        )
+        return
+
+    await update.message.reply_text("📝 Summarizing our conversation...")
+
+    convo_text = ""
+    for msg in history:
+        role = "You" if msg["role"] == "user" else "Bot"
+        convo_text += f"{role}: {msg['content']}\n\n"
+
+    summary = await get_ai_response(
+        f"Summarize this conversation concisely, highlighting key topics, "
+        f"decisions made, and any action items:\n\n{convo_text}",
+        user_id
+    )
+    await send_long_message(update, f"📝 *Conversation Summary:*\n\n{summary}")
+
+
+@private_only
+async def remind_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Set a reminder — stores it as a high importance memory."""
+    user_id = update.effective_user.id
+    reminder = " ".join(context.args)
+
+    if not reminder:
+        await update.message.reply_text(
+            "Please provide a reminder.\n*Example:* `/remind check trading bot performance tomorrow`",
+            parse_mode="Markdown"
+        )
+        return
+
+    await db.save_memory(
+        user_id,
+        f"REMINDER: {reminder}",
+        category="reminder",
+        importance=3
+    )
+
+    await update.message.reply_text(
+        f"⏰ Reminder saved!\n\n*{reminder}*\n\n"
+        f"I'll keep this in mind in our conversations. "
+        f"Use `/memory` to see all your reminders.",
+        parse_mode="Markdown"
+    )
+
+
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
     """Global error handler."""
     logger.error("Unhandled exception:", exc_info=context.error)
@@ -795,6 +899,10 @@ def main():
     application.add_handler(CommandHandler("stats",       stats_command))
     application.add_handler(CommandHandler("memory",      memory_command))
     application.add_handler(CommandHandler("clearmemory", clear_memory_command))
+    application.add_handler(CommandHandler("search",      search_command))
+    application.add_handler(CommandHandler("projects",    projects_command))
+    application.add_handler(CommandHandler("summarize",   summarize_command))
+    application.add_handler(CommandHandler("remind",      remind_command))
 
     # Messages
     application.add_handler(
