@@ -31,9 +31,10 @@ from pydub import AudioSegment
 # Tavily web search
 from tavily import TavilyClient
 
-# Database & project builder
+# Database, project builder & memory engine
 from database_manager import db
 from project_builder import builder
+from memory_engine import memory_engine
 from project_builder import builder
 
 # Environment
@@ -272,40 +273,43 @@ Examples:
 Respond ONLY with the JSON array, no other text."""
 
 
-async def extract_and_save_memories(user_id: int, message: str):
-    """Extract important facts from a message and save to memory."""
+async def process_memories(user_id: int, message: str):
+    """Extract, save and summarize memories from a message."""
     try:
-        response = await claude.messages.create(
-            model="claude-sonnet-4-5",
-            max_tokens=300,
-            system=MEMORY_EXTRACTION_PROMPT,
-            messages=[{"role": "user", "content": message}]
-        )
-        raw = response.content[0].text.strip()
-        if raw.startswith("```"):
-            raw = raw.split("\n", 1)[-1].rsplit("```", 1)[0]
+        # Extract new memories
+        new_memories = await memory_engine.extract_memories(message)
+        for item in new_memories:
+            await db.save_memory(
+                user_id,
+                item.get("memory", ""),
+                item.get("category", "general"),
+                item.get("importance", 1)
+            )
 
-        import json
-        memories = json.loads(raw)
-        for memory in memories:
-            if memory and len(memory) > 5:
-                await db.save_memory(user_id, memory)
+        # Update summary every 5 messages
+        all_memories = await db.get_memories(user_id, limit=50)
+        if all_memories and len(all_memories) % 5 == 0:
+            summary = await memory_engine.summarize_memories(all_memories)
+            if summary:
+                await db.save_memory_summary(user_id, summary)
+
     except Exception as e:
-        logger.error(f"Memory extraction error: {e}")
+        logger.error(f"Memory processing error: {e}")
 
 
 async def get_ai_response(user_message: str, user_id: int,
                            extra_content: list = None) -> str:
-    """Get a response from Claude with persistent conversation history and memory."""
+    """Get a response from Claude with Level 3 persistent memory."""
     history = await db.get_conversation_history(user_id, limit=10)
 
-    # Load user memories and inject into system prompt
-    memories = await db.get_memories(user_id)
-    memory_context = ""
-    if memories:
-        memory_context = "\n\nWhat you know about this user:\n"
-        memory_context += "\n".join(f"- {m}" for m in memories)
+    # Load memory summary and relevant memories
+    summary = await db.get_memory_summary(user_id)
+    all_memories = await db.get_memories(user_id, limit=50)
+    relevant = await memory_engine.get_relevant_memories(user_message, all_memories)
+    stats = await db.get_user_stats(user_id)
 
+    # Build rich memory context
+    memory_context = memory_engine.build_memory_context(summary, relevant, stats)
     enhanced_system = SYSTEM_PROMPT + memory_context
 
     if extra_content:
@@ -324,8 +328,8 @@ async def get_ai_response(user_message: str, user_id: int,
     ai_response = response.content[0].text
     await db.log_conversation(user_id, user_message, ai_response)
 
-    # Extract and save memories in the background
-    asyncio.create_task(extract_and_save_memories(user_id, user_message))
+    # Process memories in background
+    asyncio.create_task(process_memories(user_id, user_message))
 
     return ai_response
 

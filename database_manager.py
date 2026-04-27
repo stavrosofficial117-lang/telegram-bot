@@ -151,7 +151,21 @@ class DatabaseManager:
                     user_id INTEGER,
                     memory TEXT NOT NULL,
                     category TEXT DEFAULT 'general',
+                    importance INTEGER DEFAULT 1,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    last_accessed TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    access_count INTEGER DEFAULT 0,
+                    FOREIGN KEY (user_id) REFERENCES users (user_id)
+                )
+            """)
+
+            # Memory summaries table
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS memory_summaries (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER UNIQUE,
+                    summary TEXT,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     FOREIGN KEY (user_id) REFERENCES users (user_id)
                 )
             """)
@@ -395,10 +409,9 @@ class DatabaseManager:
             }
 
     async def save_memory(self, user_id: int, memory: str,
-                           category: str = 'general'):
+                           category: str = 'general', importance: int = 1):
         """Save a memory about the user."""
         async with aiosqlite.connect(self.db_path) as db:
-            # Avoid duplicate memories
             cursor = await db.execute("""
                 SELECT id FROM user_memories
                 WHERE user_id = ? AND memory = ?
@@ -406,21 +419,55 @@ class DatabaseManager:
             existing = await cursor.fetchone()
             if not existing:
                 await db.execute("""
-                    INSERT INTO user_memories (user_id, memory, category)
-                    VALUES (?, ?, ?)
-                """, (user_id, memory, category))
+                    INSERT INTO user_memories
+                    (user_id, memory, category, importance)
+                    VALUES (?, ?, ?, ?)
+                """, (user_id, memory, category, importance))
                 await db.commit()
 
-    async def get_memories(self, user_id: int, limit: int = 20) -> List[str]:
-        """Get all memories for a user."""
+    async def get_memories(self, user_id: int, limit: int = 30) -> List[str]:
+        """Get all memories for a user ordered by importance and recency."""
         async with aiosqlite.connect(self.db_path) as db:
             cursor = await db.execute("""
                 SELECT memory FROM user_memories
                 WHERE user_id = ?
-                ORDER BY created_at DESC LIMIT ?
+                ORDER BY importance DESC, last_accessed DESC LIMIT ?
             """, (user_id, limit))
             rows = await cursor.fetchall()
             return [row[0] for row in rows]
+
+    async def get_memories_by_category(self, user_id: int,
+                                        category: str) -> List[str]:
+        """Get memories filtered by category."""
+        async with aiosqlite.connect(self.db_path) as db:
+            cursor = await db.execute("""
+                SELECT memory FROM user_memories
+                WHERE user_id = ? AND category = ?
+                ORDER BY importance DESC, created_at DESC
+            """, (user_id, category))
+            rows = await cursor.fetchall()
+            return [row[0] for row in rows]
+
+    async def save_memory_summary(self, user_id: int, summary: str):
+        """Save or update a user's memory summary."""
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute("""
+                INSERT INTO memory_summaries (user_id, summary, updated_at)
+                VALUES (?, ?, ?)
+                ON CONFLICT(user_id) DO UPDATE SET
+                    summary = excluded.summary,
+                    updated_at = excluded.updated_at
+            """, (user_id, summary, datetime.now()))
+            await db.commit()
+
+    async def get_memory_summary(self, user_id: int) -> str:
+        """Get the user's memory summary."""
+        async with aiosqlite.connect(self.db_path) as db:
+            cursor = await db.execute("""
+                SELECT summary FROM memory_summaries WHERE user_id = ?
+            """, (user_id,))
+            row = await cursor.fetchone()
+            return row[0] if row else ""
 
     async def delete_memory(self, user_id: int, memory_id: int):
         """Delete a specific memory."""
@@ -435,6 +482,9 @@ class DatabaseManager:
         async with aiosqlite.connect(self.db_path) as db:
             await db.execute(
                 "DELETE FROM user_memories WHERE user_id = ?", (user_id,)
+            )
+            await db.execute(
+                "DELETE FROM memory_summaries WHERE user_id = ?", (user_id,)
             )
             await db.commit()
 

@@ -13,6 +13,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY claude_bot.py .
 COPY database_manager.py .
 COPY project_builder.py .
+COPY memory_engine.py .
 
 # Persistent storage for the database
 RUN mkdir -p /app/data
