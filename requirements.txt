@@ -7,6 +7,9 @@ anthropic>=0.89.0
 # Groq (Whisper voice transcription - free & fast)
 groq
 
+# Web requests (URL reader, weather)
+aiohttp>=3.8.0
+
 # Web search
 tavily-python
 

@@ -4,6 +4,7 @@ import time
 import os
 import base64
 import tempfile
+import aiohttp
 from datetime import datetime
 from functools import wraps
 from pathlib import Path
@@ -35,7 +36,6 @@ from tavily import TavilyClient
 from database_manager import db
 from project_builder import builder
 from memory_engine import memory_engine
-from project_builder import builder
 
 # Environment
 from dotenv import load_dotenv
@@ -51,6 +51,7 @@ GROQ_API_KEY      = os.getenv("GROQ_API_KEY")
 OPENAI_API_KEY    = None  # Not needed — using Groq
 TTS_VOICE         = os.getenv("TTS_VOICE", "en-US-JennyNeural")
 TAVILY_API_KEY    = os.getenv("TAVILY_API_KEY")
+WEATHER_API_KEY   = os.getenv("WEATHER_API_KEY")
 _raw_id           = os.getenv("ALLOWED_USER_ID", "")
 ALLOWED_USER_ID   = int(_raw_id) if _raw_id.strip().isdigit() else None
 
@@ -333,6 +334,98 @@ async def get_ai_response(user_message: str, user_id: int,
 
     return ai_response
 
+async def read_url(url: str) -> str:
+    """Fetch and extract text content from a URL."""
+    try:
+        headers = {"User-Agent": "Mozilla/5.0"}
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+                if resp.status != 200:
+                    return f"Could not fetch URL (status {resp.status})"
+                html = await resp.text()
+
+        # Strip HTML tags simply
+        import re
+        text = re.sub(r'<script[^>]*>.*?</script>', '', html, flags=re.DOTALL)
+        text = re.sub(r'<style[^>]*>.*?</style>', '', text, flags=re.DOTALL)
+        text = re.sub(r'<[^>]+>', ' ', text)
+        text = re.sub(r'\s+', ' ', text).strip()
+
+        # Truncate to 8000 chars
+        if len(text) > 8000:
+            text = text[:8000] + "... [truncated]"
+        return text
+    except Exception as e:
+        return f"Error reading URL: {e}"
+
+
+async def get_weather(city: str) -> str:
+    """Get current weather for a city using OpenWeatherMap."""
+    if not WEATHER_API_KEY:
+        # Fall back to Tavily search
+        results = await web_search(f"current weather in {city} today")
+        return results or f"No weather data available for {city}"
+
+    try:
+        url = (
+            f"http://api.openweathermap.org/data/2.5/weather"
+            f"?q={city}&appid={WEATHER_API_KEY}&units=metric"
+        )
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url) as resp:
+                data = await resp.json()
+
+        if data.get("cod") != 200:
+            return f"City not found: {city}"
+
+        temp = data["main"]["temp"]
+        feels = data["main"]["feels_like"]
+        desc = data["weather"][0]["description"].capitalize()
+        humidity = data["main"]["humidity"]
+        wind = data["wind"]["speed"]
+        city_name = data["name"]
+        country = data["sys"]["country"]
+
+        return (
+            f"🌤️ *Weather in {city_name}, {country}*\n\n"
+            f"🌡️ Temperature: {temp}°C (feels like {feels}°C)\n"
+            f"☁️ Condition: {desc}\n"
+            f"💧 Humidity: {humidity}%\n"
+            f"💨 Wind: {wind} m/s"
+        )
+    except Exception as e:
+        return f"Weather error: {e}"
+
+
+async def generate_briefing(user_id: int) -> str:
+    """Generate a daily briefing with news + reminders + summary."""
+    # Get reminders from memory
+    memories = await db.get_memories_by_category(user_id, "reminder")
+    reminders_text = ""
+    if memories:
+        reminders_text = "📌 *Your Reminders:*\n"
+        reminders_text += "\n".join(f"• {m.replace('REMINDER: ', '')}" for m in memories)
+        reminders_text += "\n\n"
+
+    # Get top news
+    news = await web_search("top news today")
+
+    # Get weather for Irvine by default (from memory)
+    weather = await get_weather("Irvine")
+
+    # Ask Claude to compile everything
+    prompt = (
+        f"Create a concise morning briefing. Include:\n\n"
+        f"Weather:\n{weather}\n\n"
+        f"Reminders:\n{reminders_text or 'None'}\n\n"
+        f"Top News:\n{news}\n\n"
+        f"Keep it punchy and useful. Use emojis."
+    )
+
+    briefing = await get_ai_response(prompt, user_id)
+    return briefing
+
+
 # ─────────────────────────────────────────────
 #  COMMANDS
 # ─────────────────────────────────────────────
@@ -567,6 +660,15 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("🚀 Got it! Starting to build now...")
         await _execute_build(update, original_description, user_message)
         return
+
+    # Check if message contains a URL
+    import re
+    url_pattern = re.compile(r'https?://[^\s]+')
+    urls = url_pattern.findall(user_message)
+    if urls:
+        await update.message.reply_text("🌐 Reading that URL...")
+        url_content = await read_url(urls[0])
+        user_message = f"{user_message}\n\nURL content:\n{url_content}"
 
     # Natural language build trigger
     lower = user_message.lower()
@@ -857,6 +959,27 @@ async def remind_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
+@private_only
+async def weather_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Get current weather for a city."""
+    city = " ".join(context.args) or "Irvine"
+    await update.message.reply_text(f"🌤️ Getting weather for {city}...")
+    weather = await get_weather(city)
+    await send_long_message(update, weather)
+
+
+@private_only
+async def briefing_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Generate a daily briefing."""
+    user_id = update.effective_user.id
+    await update.message.reply_text("📰 Generating your daily briefing...")
+    briefing = await generate_briefing(user_id)
+    await send_long_message(update, f"☀️ *Your Daily Briefing*\n\n{briefing}")
+
+    if await db.get_voice_enabled(user_id):
+        await send_voice_reply(update, briefing)
+
+
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
     """Global error handler."""
     logger.error("Unhandled exception:", exc_info=context.error)
@@ -903,6 +1026,8 @@ def main():
     application.add_handler(CommandHandler("projects",    projects_command))
     application.add_handler(CommandHandler("summarize",   summarize_command))
     application.add_handler(CommandHandler("remind",      remind_command))
+    application.add_handler(CommandHandler("weather",     weather_command))
+    application.add_handler(CommandHandler("briefing",    briefing_command))
 
     # Messages
     application.add_handler(
