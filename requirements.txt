@@ -26,4 +26,4 @@ aiosqlite==0.19.0
 python-dotenv==1.0.0
 
 # Audio conversion (ogg → wav for Whisper)
-pydub==0.25.1
+pydub==0.25.1replicate
