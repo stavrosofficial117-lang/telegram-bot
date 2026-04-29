@@ -405,7 +405,7 @@ async def generate_image(prompt: str) -> str:
 
     try:
         headers = {
-            "Authorization": f"Token {REPLICATE_API_KEY}",
+            "Authorization": f"Bearer {REPLICATE_API_KEY}",
             "Content-Type": "application/json"
         }
 
