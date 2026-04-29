@@ -408,28 +408,26 @@ async def generate_image(prompt: str) -> str:
             "Authorization": f"Token {REPLICATE_API_KEY}",
             "Content-Type": "application/json"
         }
-        payload = {
-            "version": "black-forest-labs/flux-schnell",
-            "input": {
-                "prompt": prompt,
-                "num_outputs": 1,
-                "aspect_ratio": "1:1",
-                "output_format": "jpg",
-                "output_quality": 90
-            }
-        }
 
         async with aiohttp.ClientSession() as session:
             # Create prediction
             async with session.post(
                 "https://api.replicate.com/v1/models/black-forest-labs/flux-schnell/predictions",
-                json={"input": {"prompt": prompt, "num_outputs": 1, "aspect_ratio": "1:1", "output_format": "jpg"}},
+                json={"input": {
+                    "prompt": prompt,
+                    "num_outputs": 1,
+                    "aspect_ratio": "1:1",
+                    "output_format": "jpg",
+                    "output_quality": 90
+                }},
                 headers=headers
             ) as resp:
                 data = await resp.json()
+                logger.info(f"Replicate create response: {data}")
                 prediction_id = data.get("id")
 
             if not prediction_id:
+                logger.error(f"No prediction ID: {data}")
                 return None
 
             # Poll for result
@@ -441,6 +439,7 @@ async def generate_image(prompt: str) -> str:
                 ) as resp:
                     result = await resp.json()
                     status = result.get("status")
+                    logger.info(f"Replicate status: {status}")
 
                     if status == "succeeded":
                         output = result.get("output")
