@@ -398,57 +398,16 @@ async def get_weather(city: str) -> str:
         return f"Weather error: {e}"
 
 
-async def generate_image(prompt: str) -> str:
-    """Generate an image using Flux via Replicate API."""
-    if not REPLICATE_API_KEY:
-        return None
-
+async def generate_image(prompt: str) -> bytes:
+    """Generate an image using Pollinations.ai - free, no API key needed."""
     try:
-        headers = {
-            "Authorization": f"Bearer {REPLICATE_API_KEY}",
-            "Content-Type": "application/json"
-        }
-
+        import urllib.parse
+        encoded = urllib.parse.quote(prompt)
+        url = f"https://image.pollinations.ai/prompt/{encoded}?width=1024&height=1024&nologo=true"
         async with aiohttp.ClientSession() as session:
-            # Create prediction
-            async with session.post(
-                "https://api.replicate.com/v1/models/stability-ai/sdxl:39ed52f2a78e934b3ba6e2a89f5b1c712de7dfea535525255b1aa35c5565e08b/predictions",
-                json={"input": {
-                    "prompt": prompt,
-                    "num_outputs": 1,
-                    "aspect_ratio": "1:1",
-                    "output_format": "jpg",
-                    "output_quality": 90
-                }},
-                headers=headers
-            ) as resp:
-                data = await resp.json()
-                logger.info(f"Replicate create response: {data}")
-                prediction_id = data.get("id")
-
-            if not prediction_id:
-                logger.error(f"No prediction ID: {data}")
-                return None
-
-            # Poll for result
-            for _ in range(30):
-                await asyncio.sleep(2)
-                async with session.get(
-                    f"https://api.replicate.com/v1/predictions/{prediction_id}",
-                    headers=headers
-                ) as resp:
-                    result = await resp.json()
-                    status = result.get("status")
-                    logger.info(f"Replicate status: {status}")
-
-                    if status == "succeeded":
-                        output = result.get("output")
-                        if output and len(output) > 0:
-                            return output[0]
-                    elif status == "failed":
-                        logger.error(f"Image generation failed: {result}")
-                        return None
-
+            async with session.get(url, timeout=aiohttp.ClientTimeout(total=60)) as resp:
+                if resp.status == 200:
+                    return await resp.read()
         return None
     except Exception as e:
         logger.error(f"Image generation error: {e}")
