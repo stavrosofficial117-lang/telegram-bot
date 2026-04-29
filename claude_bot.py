@@ -1041,11 +1041,11 @@ async def imagine_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         chat_id=update.effective_chat.id, action=ChatAction.UPLOAD_PHOTO
     )
 
-    image_url = await generate_image(prompt)
+    image_data = await generate_image(prompt)
 
-    if image_url:
+    if image_data:
         await update.message.reply_photo(
-            photo=image_url,
+            photo=image_data,
             caption=f"🎨 {prompt}"
         )
     else:
