@@ -414,8 +414,10 @@ async def generate_image(prompt: str) -> bytes:
             )
         )
         if output and len(output) > 0:
-            url = str(output[0])
-            import aiohttp
+            file_output = output[0]
+            if hasattr(file_output, "read"):
+                return file_output.read()
+            url = str(file_output)
             async with aiohttp.ClientSession() as session:
                 async with session.get(url) as resp:
                     if resp.status == 200:
