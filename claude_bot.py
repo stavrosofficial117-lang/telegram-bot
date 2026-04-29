@@ -399,16 +399,18 @@ async def get_weather(city: str) -> str:
 
 
 async def generate_image(prompt: str) -> bytes:
-    """Generate an image using Pollinations.ai - free, no API key needed."""
+    """Generate an image using Hugging Face free inference API."""
     try:
-        import urllib.parse
-        encoded = urllib.parse.quote(prompt)
-        url = f"https://image.pollinations.ai/prompt/{encoded}?width=1024&height=1024&nologo=true"
-        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+        API_URL = "https://api-inference.huggingface.co/models/stabilityai/stable-diffusion-2-1"
+        headers = {"Content-Type": "application/json"}
+        payload = {"inputs": prompt}
         async with aiohttp.ClientSession() as session:
-            async with session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=60)) as resp:
+            async with session.post(API_URL, json=payload, headers=headers, timeout=aiohttp.ClientTimeout(total=60)) as resp:
                 if resp.status == 200:
                     return await resp.read()
+                else:
+                    text = await resp.text()
+                    logger.error(f"HuggingFace error {resp.status}: {text}")
         return None
     except Exception as e:
         logger.error(f"Image generation error: {e}")
