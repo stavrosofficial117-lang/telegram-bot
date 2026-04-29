@@ -404,8 +404,9 @@ async def generate_image(prompt: str) -> bytes:
         import urllib.parse
         encoded = urllib.parse.quote(prompt)
         url = f"https://image.pollinations.ai/prompt/{encoded}?width=1024&height=1024&nologo=true"
+        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
         async with aiohttp.ClientSession() as session:
-            async with session.get(url, timeout=aiohttp.ClientTimeout(total=60)) as resp:
+            async with session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=60)) as resp:
                 if resp.status == 200:
                     return await resp.read()
         return None
