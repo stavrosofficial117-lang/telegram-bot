@@ -401,7 +401,7 @@ async def get_weather(city: str) -> str:
 async def generate_image(prompt: str) -> bytes:
     """Generate an image using Hugging Face free inference API."""
     try:
-        API_URL = "https://api-inference.huggingface.co/models/stabilityai/stable-diffusion-2-1"
+        API_URL = "https://router.huggingface.co/hf-inference/models/stabilityai/stable-diffusion-xl-base-1.0/text-to-image"
         headers = {"Content-Type": "application/json"}
         payload = {"inputs": prompt}
         async with aiohttp.ClientSession() as session:
