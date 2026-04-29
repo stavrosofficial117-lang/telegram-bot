@@ -428,6 +428,36 @@ async def generate_image(prompt: str) -> bytes:
         return None
 
 
+async def generate_pixel_art(prompt: str) -> bytes:
+    """Generate pixel art using Retro Diffusion (rd-plus) via Replicate."""
+    if not REPLICATE_API_KEY:
+        return None
+    try:
+        import replicate
+        os.environ["REPLICATE_API_TOKEN"] = REPLICATE_API_KEY
+        loop = asyncio.get_event_loop()
+        output = await loop.run_in_executor(
+            None,
+            lambda: replicate.run(
+                "retro-diffusion/rd-plus",
+                input={"prompt": prompt, "width": 256, "height": 256, "num_images": 1}
+            )
+        )
+        if output:
+            file_output = output[0] if isinstance(output, list) else output
+            if hasattr(file_output, "read"):
+                return file_output.read()
+            url = str(file_output)
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url) as resp:
+                    if resp.status == 200:
+                        return await resp.read()
+        return None
+    except Exception as e:
+        logger.error(f"Pixel art generation error: {e}")
+        return None
+
+
 async def generate_briefing(user_id: int) -> str:
     """Generate a daily briefing with news + reminders + summary."""
     # Get reminders from memory
@@ -1066,6 +1096,33 @@ async def post_init(application):
     logger.info("✅ Database initialised")
 
 
+async def pixelart_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Generate pixel art from a prompt using Retro Diffusion."""
+    if not context.args:
+        await update.message.reply_text(
+            "🎮 *Pixel Art Generator*\n\n"
+            "Usage: `/pixelart <prompt>`\n\n"
+            "*Example:*\n`/pixelart cozy cyberpunk bedroom at night, neon city through window`",
+            parse_mode="Markdown"
+        )
+        return
+    prompt = " ".join(context.args)
+    if not REPLICATE_API_KEY:
+        await update.message.reply_text(
+            "Image generation is not configured. Add REPLICATE_API_KEY to Railway Variables."
+        )
+        return
+    await update.message.reply_text(f"🎮 Generating pixel art: _{prompt}_...", parse_mode="Markdown")
+    await context.bot.send_chat_action(
+        chat_id=update.effective_chat.id, action=ChatAction.UPLOAD_PHOTO
+    )
+    image_data = await generate_pixel_art(prompt)
+    if image_data:
+        await update.message.reply_photo(photo=image_data, caption=f"🎮 {prompt}")
+    else:
+        await update.message.reply_text("🛠️ Something went wrong on my end. Please try again in a moment!")
+
+
 def main():
     if not BOT_TOKEN:
         logger.error("BOT_TOKEN not set")
@@ -1097,6 +1154,7 @@ def main():
     application.add_handler(CommandHandler("weather",     weather_command))
     application.add_handler(CommandHandler("briefing",    briefing_command))
     application.add_handler(CommandHandler("imagine",     imagine_command))
+    application.add_handler(CommandHandler("pixelart",    pixelart_command))
 
     # Messages
     application.add_handler(
