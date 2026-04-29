@@ -412,7 +412,7 @@ async def generate_image(prompt: str) -> str:
         async with aiohttp.ClientSession() as session:
             # Create prediction
             async with session.post(
-                "https://api.replicate.com/v1/models/black-forest-labs/flux-schnell/predictions",
+                "https://api.replicate.com/v1/models/stability-ai/sdxl:39ed52f2a78e934b3ba6e2a89f5b1c712de7dfea535525255b1aa35c5565e08b/predictions",
                 json={"input": {
                     "prompt": prompt,
                     "num_outputs": 1,
