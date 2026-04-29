@@ -399,18 +399,27 @@ async def get_weather(city: str) -> str:
 
 
 async def generate_image(prompt: str) -> bytes:
-    """Generate an image using Hugging Face free inference API."""
+    """Generate an image using SDXL via Replicate."""
+    if not REPLICATE_API_KEY:
+        return None
     try:
-        API_URL = "https://router.huggingface.co/hf-inference/models/stabilityai/stable-diffusion-xl-base-1.0/text-to-image"
-        headers = {"Content-Type": "application/json"}
-        payload = {"inputs": prompt}
-        async with aiohttp.ClientSession() as session:
-            async with session.post(API_URL, json=payload, headers=headers, timeout=aiohttp.ClientTimeout(total=60)) as resp:
-                if resp.status == 200:
-                    return await resp.read()
-                else:
-                    text = await resp.text()
-                    logger.error(f"HuggingFace error {resp.status}: {text}")
+        import replicate
+        os.environ["REPLICATE_API_TOKEN"] = REPLICATE_API_KEY
+        loop = asyncio.get_event_loop()
+        output = await loop.run_in_executor(
+            None,
+            lambda: replicate.run(
+                "stability-ai/sdxl:39ed52f2a78e934b3ba6e2a89f5b1c712de7dfea535525255b1aa35c5565e08b",
+                input={"prompt": prompt, "num_outputs": 1, "width": 1024, "height": 1024}
+            )
+        )
+        if output and len(output) > 0:
+            url = str(output[0])
+            import aiohttp
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url) as resp:
+                    if resp.status == 200:
+                        return await resp.read()
         return None
     except Exception as e:
         logger.error(f"Image generation error: {e}")
