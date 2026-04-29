@@ -51,6 +51,7 @@ GROQ_API_KEY      = os.getenv("GROQ_API_KEY")
 OPENAI_API_KEY    = None  # Not needed — using Groq
 TTS_VOICE         = os.getenv("TTS_VOICE", "en-US-JennyNeural")
 TAVILY_API_KEY    = os.getenv("TAVILY_API_KEY")
+REPLICATE_API_KEY = os.getenv("REPLICATE_API_KEY")
 WEATHER_API_KEY   = os.getenv("WEATHER_API_KEY")
 _raw_id           = os.getenv("ALLOWED_USER_ID", "")
 ALLOWED_USER_ID   = int(_raw_id) if _raw_id.strip().isdigit() else None
@@ -395,6 +396,64 @@ async def get_weather(city: str) -> str:
         )
     except Exception as e:
         return f"Weather error: {e}"
+
+
+async def generate_image(prompt: str) -> str:
+    """Generate an image using Flux via Replicate API."""
+    if not REPLICATE_API_KEY:
+        return None
+
+    try:
+        headers = {
+            "Authorization": f"Token {REPLICATE_API_KEY}",
+            "Content-Type": "application/json"
+        }
+        payload = {
+            "version": "black-forest-labs/flux-schnell",
+            "input": {
+                "prompt": prompt,
+                "num_outputs": 1,
+                "aspect_ratio": "1:1",
+                "output_format": "jpg",
+                "output_quality": 90
+            }
+        }
+
+        async with aiohttp.ClientSession() as session:
+            # Create prediction
+            async with session.post(
+                "https://api.replicate.com/v1/models/black-forest-labs/flux-schnell/predictions",
+                json={"input": {"prompt": prompt, "num_outputs": 1, "aspect_ratio": "1:1", "output_format": "jpg"}},
+                headers=headers
+            ) as resp:
+                data = await resp.json()
+                prediction_id = data.get("id")
+
+            if not prediction_id:
+                return None
+
+            # Poll for result
+            for _ in range(30):
+                await asyncio.sleep(2)
+                async with session.get(
+                    f"https://api.replicate.com/v1/predictions/{prediction_id}",
+                    headers=headers
+                ) as resp:
+                    result = await resp.json()
+                    status = result.get("status")
+
+                    if status == "succeeded":
+                        output = result.get("output")
+                        if output and len(output) > 0:
+                            return output[0]
+                    elif status == "failed":
+                        logger.error(f"Image generation failed: {result}")
+                        return None
+
+        return None
+    except Exception as e:
+        logger.error(f"Image generation error: {e}")
+        return None
 
 
 async def generate_briefing(user_id: int) -> str:
@@ -960,6 +1019,43 @@ async def remind_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 @private_only
+async def imagine_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Generate an image using Flux."""
+    prompt = " ".join(context.args)
+
+    if not prompt:
+        await update.message.reply_text(
+            "Please describe the image you want.\n\n"
+            "*Example:*\n`/imagine a futuristic city at sunset, cyberpunk style`",
+            parse_mode="Markdown"
+        )
+        return
+
+    if not REPLICATE_API_KEY:
+        await update.message.reply_text(
+            "Image generation is not configured. Add REPLICATE_API_KEY to Railway Variables."
+        )
+        return
+
+    await update.message.reply_text(f"🎨 Generating: _{prompt}_...", parse_mode="Markdown")
+    await context.bot.send_chat_action(
+        chat_id=update.effective_chat.id, action=ChatAction.UPLOAD_PHOTO
+    )
+
+    image_url = await generate_image(prompt)
+
+    if image_url:
+        await update.message.reply_photo(
+            photo=image_url,
+            caption=f"🎨 {prompt}"
+        )
+    else:
+        await update.message.reply_text(
+            "Sorry, image generation failed. Please try again with a different prompt."
+        )
+
+
+@private_only
 async def weather_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Get current weather for a city."""
     city = " ".join(context.args) or "Irvine"
@@ -1028,6 +1124,7 @@ def main():
     application.add_handler(CommandHandler("remind",      remind_command))
     application.add_handler(CommandHandler("weather",     weather_command))
     application.add_handler(CommandHandler("briefing",    briefing_command))
+    application.add_handler(CommandHandler("imagine",     imagine_command))
 
     # Messages
     application.add_handler(
